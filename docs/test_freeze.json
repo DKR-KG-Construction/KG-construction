@@ -1,0 +1,73 @@
+{
+  "files": {
+    "config": {
+      "path": "config.yaml",
+      "sha256": "e9212da35561fa2544250ac3e481a6c9b80f23202c4b82733f66e7c8ad4bee8e"
+    },
+    "prompt": {
+      "path": "prompts\\extract_v1.txt",
+      "sha256": "5d0cdd0675574ba144429603070c10e8f7c0028cdf0a766bca1af20d196aa4cc"
+    },
+    "schema": {
+      "path": "schema\\schema.json",
+      "sha256": "0e2a2723a29dc07b46bacc7eb65681ddc30ee7622f80e546a4cc7a5bbded8ead"
+    },
+    "test_data": {
+      "path": "data\\Re-DocRED\\test_revised.json",
+      "sha256": "ea673b7ef91e16510d7eb88863d3903e47318dc5653ef361266f27ae3b84723c"
+    }
+  },
+  "test_extractor_fingerprint": "1323a05a080630db",
+  "eval": {
+    "sizes": [
+      25,
+      50,
+      100,
+      200
+    ],
+    "seeds": [
+      0,
+      1,
+      2,
+      3,
+      4
+    ],
+    "primary_seed": 0,
+    "primary_n": 200
+  },
+  "judge": {
+    "enabled": false,
+    "backend": "ollama",
+    "model": "llama3.2:3b",
+    "host": "http://localhost:11434",
+    "api_key_env": "",
+    "temperature": 0,
+    "seed": 0,
+    "max_tokens": 200,
+    "num_ctx": 4096,
+    "timeout_s": 300,
+    "retries": 2,
+    "prompt_file": "prompts/judge_v1.txt",
+    "context_sentences": 1,
+    "on_error": "reject"
+  },
+  "matching": {
+    "mode": "exact",
+    "jaccard": 0.5
+  },
+  "c": {
+    "containment": true,
+    "min_tokens": 1,
+    "containment_types": [
+      "PER"
+    ]
+  },
+  "s": {
+    "drop_self_loops": true
+  },
+  "p": {
+    "min_quote_chars": 8,
+    "require_claimed_sentence": false,
+    "require_endpoints_in_quote": false
+  }
+}
