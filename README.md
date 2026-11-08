@@ -10,108 +10,202 @@ facts do they throw away? Dataset: [Re-DocRED](https://github.com/tonytan48/Re-D
 
 Main comparison `raw, C, C+S, C+S+P`; secondary ablation: all 8 combinations. Every rejected item is logged with a reason.
 
-## Quick start (local, Ollama)
+## Run the selected project from a clean checkout
 
-Requires Python 3.11 or newer.
+This is the single recommended path for a new team member to reproduce the **DEV-selected final
+experiment**. It uses the pretrained `qwen2.5:3b` model; **there is no model training or
+fine-tuning**. The repository includes the TRAIN-derived schema, selected configuration, and TEST
+freeze manifest. The selected primary configuration is C+S. The P ablation in the proposal
+sample is quote-existence-only because the LLM judge is disabled.
 
-The commands below show environment setup. This repository already contains the
-TRAIN-derived schema and the DEV-selected configuration. **Do not rerun `pilot`,
-`train-baseline`, `extract-dev`, or `evaluate-dev` to continue the frozen TEST run.**
-Those commands are for reproducing/developing the study from scratch and may
-regenerate artifacts. The current final selection is C+S with the entire P stage
-disabled (neither quote validation nor the LLM judge is applied).
+### 1. Install prerequisites
 
-```bash
-python3 -m venv .venv && source .venv/bin/activate
-python -m pip install -r requirements.lock
-bash run.sh test        # offline tests, no model needed (uses a test-only mock LLM)
-bash run.sh data        # download Re-DocRED at a pinned commit and verify sha256
-# In a separate terminal, install the model configured in config.yaml:
-ollama pull qwen2.5:3b
-```
-
-For the already-selected configuration, run `bash run.sh freeze-test` only if no
-valid freeze manifest exists, then run `bash run.sh extract-test`. Do not change
-`config.yaml`, the extractor prompt, or the schema after freezing. See the TEST
-commands below.
-
-### Reproduce the experiment from scratch
-
-These are development steps, not required to continue the already-frozen TEST run.
-They use the pretrained Ollama model; there is no model training or fine-tuning.
-Run the schema-building/pilot step before selecting the configuration because it
-regenerates `schema/schema.json`:
+Install Python 3.11+, Git for Windows (including Git Bash), and Ollama. Open Git Bash and clone
+the repository:
 
 ```bash
-bash run.sh pilot
-bash run.sh train-baseline 200 outputs/raw/train_baseline.jsonl
-bash run.sh extract-dev
-bash run.sh evaluate-dev
+git clone https://github.com/DKR-KG-Construction/KG-construction.git
+cd KG-construction
 ```
 
-`train-baseline 200` supplies the configured nested TRAIN sample sizes up to 200.
-`extract-dev` extracts the DEV split and `evaluate-dev` scores all C/S/P ablations.
-The checked-in configuration disables P, so these commands reproduce the selected
-C+S setup and quote-rule-only P ablations; they do not reproduce the historical
-LLM-judge comparison described in the report.
-
-To independently reproduce that judge comparison, before running `evaluate-dev`,
-temporarily set `judge.enabled: true` in `config.yaml` and ensure Ollama has both
-configured models. Run `bash run.sh evaluate-dev`; then run the quote-rule-only
-comparison separately:
-
-```bash
-PYTHONPATH=src python -m kgrepair evaluate --raw outputs/raw/dev.jsonl --split dev --no-judge \
-  --out-dir results/dev_quote_only
-```
-
-After reviewing the DEV results, restore the selected setting `judge.enabled: false`.
-Do not access/extract/evaluate TEST until the final configuration, prompt, and schema
-are selected and frozen. `bash run.sh freeze-test` records checksums; `extract-test`
-and `evaluate-test` refuse to run if those frozen inputs/settings have changed.
-TRAIN pilot annotation/calibration commands are optional human-labeling exercises,
-not model training and not required for the automatic experiment.
-
-`requirements.txt` pins the direct dependencies; `requirements.lock` pins the complete tested
-environment. To regenerate the lock after changing a dependency, install `requirements.txt` in a
-clean virtual environment and run `python -m pip freeze > requirements.lock`.
-
-#### Windows
-
-Install Python 3.11 and Git for Windows (Git Bash), then run from Git Bash:
+Create the Python environment, install dependencies, and run offline tests:
 
 ```bash
 python -m venv .venv
 source .venv/Scripts/activate
 python -m pip install -r requirements.lock
 bash run.sh test
-bash run.sh data
 ```
 
-Ollama must be installed and running separately. The extractor is set to `qwen2.5:3b` as a
-compact starting point for a 6 GiB GPU; the judge model is `llama3.2:3b`, but `judge.enabled` is
-false in the DEV-selected configuration. The selected next-run configuration is C+S without P:
-the corrected-context DEV comparison found the judge excessively restrictive. The TRAIN pilot
-also disabled the judge and used quote-rule P only. The pilot has shown that the default
-4,096-token output cap can truncate long JSON responses; `max_tokens`/`num_ctx` are currently
-6,144/12,288, but some long-document outputs still reach the cap. Treat the existing results as
-preliminary, not final.
-
-Use DEV for development and freeze the selected configuration before accessing TEST. The current
-DEV-based selection is C+S with P disabled; see the report for the automatic comparison and its
-limitations. Then,
-from Git Bash with the environment activated:
+Download and verify the pinned Re-DocRED data, then download the configured local model. Ollama
+must be running; if needed, start it in a separate terminal before pulling the model:
 
 ```bash
-# Run only if docs/test_freeze.json is absent or you deliberately re-freeze after review:
+bash run.sh data
+ollama pull qwen2.5:3b
+```
+
+### 2. Run the frozen TEST evaluation
+
+Do not run `pilot`, `train-baseline`, `extract-dev`, `evaluate-dev`, or `build-schema` in this
+reproduction path. They are development commands and can regenerate artifacts used by the frozen
+experiment. Do not edit `config.yaml`, `prompts/extract_v1.txt`, or `schema/schema.json`.
+The checked-in `docs/test_freeze.json` records their approved hashes/settings; TEST commands
+validate it and stop if those inputs have changed.
+
+Extract TEST outputs (resumable; this may take a long time):
+
+```bash
+bash run.sh extract-test
+```
+
+When extraction completes successfully, evaluate the configured five seeds and sample the
+proposal annotation items:
+
+```bash
+bash run.sh evaluate-test
+bash run.sh proposal-sample
+```
+
+### 3. Complete the two-person annotation
+
+The sample is written under `annotation/proposal_test/`. The primary annotator completes every
+row in `annotator1.csv`; the second annotator completes only the rows in `annotator2.csv` (the
+20% overlap). Both annotators use `docs.txt` and the agreed [`docs/annotation_guidelines.md`](docs/annotation_guidelines.md).
+Label each row `correct`, `incorrect`, or `uncertain`; add a short note for incorrect/uncertain
+cases. Do not change the CSV headers or item IDs. Do not show either annotator `key.json`, which
+contains the stage mapping and is only for scoring.
+
+Share the annotation CSVs and `docs.txt` with the annotators using your team's approved method.
+After both files are completed and returned to `annotation/proposal_test/`, score them:
+
+```bash
+bash run.sh proposal-score
+```
+
+The command reports per-stage manual precision and intervals, retention, correct raw facts
+removed, uncertain-label count, and agreement on the double-labelled overlap. It writes
+`results/proposal_manual_summary.csv`. Annotation files and generated results are local and
+Git-ignored; share/publish them only if your team and data policy permit.
+
+`requirements.txt` lists direct dependencies; `requirements.lock` pins the tested environment.
+For the earlier TRAIN/DEV decision evidence and limitations, see
+[`docs/midway_check.md`](docs/midway_check.md). This clean-checkout workflow reproduces the
+selected experiment; it does not rerun the historical DEV selection.
+
+## Developer path: reproduce and extend the experiment
+
+Follow this full path when you are a developer starting from a fresh clone and want to rebuild
+the TRAIN/DEV evidence, choose a configuration, and then run TEST. This is separate from the
+selected-run instructions above. It uses pretrained Ollama models—**there is no model training
+or fine-tuning**. Do not start this path while another TEST evaluation is running in the same
+checkout.
+
+### A. Clone and install
+
+Install Python 3.11+, Git, and Ollama. Open Git Bash and run:
+
+```bash
+git clone https://github.com/DKR-KG-Construction/KG-construction.git
+cd KG-construction
+python -m venv .venv
+source .venv/Scripts/activate
+python -m pip install -r requirements.lock
+bash run.sh test
+bash run.sh data
+ollama pull qwen2.5:3b
+ollama pull llama3.2:3b
+```
+
+Keep Ollama running. The extractor is `qwen2.5:3b`; the optional provenance judge is
+`llama3.2:3b`.
+
+### B. Build the TRAIN schema and run TRAIN development
+
+Run these commands in order:
+
+```bash
+bash run.sh pilot
+bash run.sh train-baseline 200 outputs/raw/train_baseline.jsonl
+```
+
+`pilot` builds `schema/schema.json` from TRAIN and runs a 10-document smoke-test pilot.
+`train-baseline` extracts 200 TRAIN documents and evaluates the configured nested sizes and
+seeds. These steps generate local files under `outputs/` and `results/`; they do not alter model
+weights. Complete any optional TRAIN annotation calibration separately, before final TEST
+annotation.
+
+### C. Extract DEV once and compare configurations
+
+Extract DEV once. Reuse this same raw extraction for both judge settings:
+
+```bash
+bash run.sh extract-dev
+```
+
+First evaluate with the checked-in setting (`judge.enabled: false`), which means P ablations
+use quote-existence validation only:
+
+```bash
+PYTHONPATH=src python -m kgrepair evaluate --raw outputs/raw/dev.jsonl --split dev \
+  --out-dir results/dev_quote_only
+```
+
+Next, make a temporary config copy with the LLM judge enabled and evaluate the same DEV output.
+The commands below do not change `config.yaml`:
+
+```bash
+cp config.yaml config_judge.yaml
+python -c "import yaml; from pathlib import Path; p=Path('config_judge.yaml'); c=yaml.safe_load(p.read_text(encoding='utf-8')); c['judge']['enabled']=True; p.write_text(yaml.safe_dump(c, sort_keys=False), encoding='utf-8')"
+PYTHONPATH=src python -m kgrepair --config config_judge.yaml evaluate \
+  --raw outputs/raw/dev.jsonl --split dev --out-dir results/dev_with_judge
+rm config_judge.yaml
+```
+
+Compare `results/dev_quote_only/auto_summary.csv` with
+`results/dev_with_judge/auto_summary.csv`. Select the final setup using the proposal's
+pre-specified criterion—not TEST. The current project selection is C+S with P disabled and
+`judge.enabled: false`; the DEV comparison and exploratory AI audit are documented in
+[`docs/midway_check.md`](docs/midway_check.md).
+
+### D. Freeze the chosen setup before TEST
+
+Set `config.yaml` to the selected final values. Make sure the final TEST data is downloaded and
+verified, then write the freeze manifest:
+
+```bash
+bash run.sh data
 bash run.sh freeze-test
-# Continue the already-started final run:
+```
+
+Review and commit the final `config.yaml`, prompt/schema if changed, and `docs/test_freeze.json`
+before running TEST. Once frozen, do not edit these files. If you deliberately change the
+configuration, prompt, or schema, review the DEV evidence and run `bash run.sh freeze-test`
+again before TEST.
+
+### E. Run TEST, create the manual sample, and score annotation
+
+With the same checkout and unchanged frozen inputs:
+
+```bash
 bash run.sh extract-test
 bash run.sh evaluate-test
 bash run.sh proposal-sample
-# After annotation, score the proposal sample.
+```
+
+After the proposal sample is generated, follow section 3 above: the primary annotator completes
+`annotation/proposal_test/annotator1.csv`; the second annotator completes the 20% overlap in
+`annotator2.csv`; neither sees `key.json`. Then score:
+
+```bash
 bash run.sh proposal-score
 ```
+
+Generated data, model responses, annotation sheets, and result files are local and Git-ignored.
+Share annotation materials with teammates through your approved channel; do not commit them
+unless the team explicitly approves. This workflow reproduces the experiment structure, but
+LLM outputs and resulting metrics may vary with model/runtime versions. The committed historical
+DEV results are reference results, not guaranteed bit-for-bit outputs from a new run.
 
 ## Layout
 
