@@ -14,18 +14,63 @@ Main comparison `raw, C, C+S, C+S+P`; secondary ablation: all 8 combinations. Ev
 
 Requires Python 3.11 or newer.
 
+The commands below show environment setup. This repository already contains the
+TRAIN-derived schema and the DEV-selected configuration. **Do not rerun `pilot`,
+`train-baseline`, `extract-dev`, or `evaluate-dev` to continue the frozen TEST run.**
+Those commands are for reproducing/developing the study from scratch and may
+regenerate artifacts. The current final selection is C+S with the entire P stage
+disabled (neither quote validation nor the LLM judge is applied).
+
 ```bash
 python3 -m venv .venv && source .venv/bin/activate
 python -m pip install -r requirements.lock
 bash run.sh test        # offline tests, no model needed (uses a test-only mock LLM)
-bash run.sh data        # download Re-DocRED at a pinned commit, verify sha256
-# in a separate terminal, install the model configured in config.yaml
+bash run.sh data        # download Re-DocRED at a pinned commit and verify sha256
+# In a separate terminal, install the model configured in config.yaml:
 ollama pull qwen2.5:3b
-bash run.sh pilot       # schema + 10 TRAIN docs + pilot report
-bash run.sh train-baseline 50 outputs/raw/train_baseline.jsonl  # TRAIN only; no judge
-bash run.sh annotate-train outputs/raw/train_baseline.jsonl     # 50-item TRAIN pilot sample
-bash run.sh annotate-calibration outputs/raw/train_baseline.jsonl  # separate 30-item calibration
 ```
+
+For the already-selected configuration, run `bash run.sh freeze-test` only if no
+valid freeze manifest exists, then run `bash run.sh extract-test`. Do not change
+`config.yaml`, the extractor prompt, or the schema after freezing. See the TEST
+commands below.
+
+### Reproduce the experiment from scratch
+
+These are development steps, not required to continue the already-frozen TEST run.
+They use the pretrained Ollama model; there is no model training or fine-tuning.
+Run the schema-building/pilot step before selecting the configuration because it
+regenerates `schema/schema.json`:
+
+```bash
+bash run.sh pilot
+bash run.sh train-baseline 200 outputs/raw/train_baseline.jsonl
+bash run.sh extract-dev
+bash run.sh evaluate-dev
+```
+
+`train-baseline 200` supplies the configured nested TRAIN sample sizes up to 200.
+`extract-dev` extracts the DEV split and `evaluate-dev` scores all C/S/P ablations.
+The checked-in configuration disables P, so these commands reproduce the selected
+C+S setup and quote-rule-only P ablations; they do not reproduce the historical
+LLM-judge comparison described in the report.
+
+To independently reproduce that judge comparison, before running `evaluate-dev`,
+temporarily set `judge.enabled: true` in `config.yaml` and ensure Ollama has both
+configured models. Run `bash run.sh evaluate-dev`; then run the quote-rule-only
+comparison separately:
+
+```bash
+PYTHONPATH=src python -m kgrepair evaluate --raw outputs/raw/dev.jsonl --split dev --no-judge \
+  --out-dir results/dev_quote_only
+```
+
+After reviewing the DEV results, restore the selected setting `judge.enabled: false`.
+Do not access/extract/evaluate TEST until the final configuration, prompt, and schema
+are selected and frozen. `bash run.sh freeze-test` records checksums; `extract-test`
+and `evaluate-test` refuse to run if those frozen inputs/settings have changed.
+TRAIN pilot annotation/calibration commands are optional human-labeling exercises,
+not model training and not required for the automatic experiment.
 
 `requirements.txt` pins the direct dependencies; `requirements.lock` pins the complete tested
 environment. To regenerate the lock after changing a dependency, install `requirements.txt` in a
@@ -58,7 +103,9 @@ limitations. Then,
 from Git Bash with the environment activated:
 
 ```bash
+# Run only if docs/test_freeze.json is absent or you deliberately re-freeze after review:
 bash run.sh freeze-test
+# Continue the already-started final run:
 bash run.sh extract-test
 bash run.sh evaluate-test
 bash run.sh proposal-sample
