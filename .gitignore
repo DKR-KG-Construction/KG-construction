@@ -1,0 +1,10 @@
+data/Re-DocRED/
+outputs/
+results/*
+!results/pilot_metrics.csv
+annotation/
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+_test_config.yaml

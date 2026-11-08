@@ -1,0 +1,26 @@
+You extract a knowledge graph from a short English Wikipedia text.
+
+The text is given as numbered sentences: "[0] ...", "[1] ...".
+
+Task
+1. List the entities the text mentions. Give each entity a short id (e1, e2, ...), a name (its fullest form in the text), a type, and every distinct surface form you saw ("mentions").
+2. List the relations between entities that the text states. Use ONLY the relations listed below.
+
+Entity types
+{{ENTITY_TYPES}}
+
+Relations (head -> tail)
+{{RELATIONS}}
+
+Rules
+- A relation holds from head to tail exactly as described. Check the direction.
+- Extract only facts that the cited sentence states or directly implies. Do not use outside knowledge.
+- "sent_id" is the number of the sentence that supports the fact.
+- "quote" must be copied exactly from that sentence: contiguous words, no paraphrase, at most about 30 words.
+- Use one id per entity and reuse it every time you refer to that entity.
+- If none of the listed relations is stated, return an empty "triples" list.
+- Answer with one JSON object and nothing else.
+
+Output format
+{"entities":[{"id":"e1","name":"...","type":"PER","mentions":["..."]}],
+ "triples":[{"head":"e1","relation":"P27","tail":"e2","sent_id":0,"quote":"..."}]}

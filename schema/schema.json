@@ -1,0 +1,255 @@
+{
+  "entity_types": [
+    "LOC",
+    "MISC",
+    "NUM",
+    "ORG",
+    "PER",
+    "TIME"
+  ],
+  "relations": {
+    "P17": {
+      "name": "country",
+      "description": "head is located in / belongs to the country tail",
+      "train_count": 14401,
+      "allowed_pairs": [
+        [
+          "LOC",
+          "LOC"
+        ],
+        [
+          "ORG",
+          "LOC"
+        ],
+        [
+          "MISC",
+          "LOC"
+        ]
+      ]
+    },
+    "P131": {
+      "name": "located in admin. entity",
+      "description": "head is located in the administrative area tail",
+      "train_count": 20402,
+      "allowed_pairs": [
+        [
+          "LOC",
+          "LOC"
+        ],
+        [
+          "ORG",
+          "LOC"
+        ]
+      ]
+    },
+    "P150": {
+      "name": "contains admin. entity",
+      "description": "head contains the administrative area tail as a subdivision",
+      "train_count": 3369,
+      "allowed_pairs": [
+        [
+          "LOC",
+          "LOC"
+        ],
+        [
+          "ORG",
+          "LOC"
+        ]
+      ]
+    },
+    "P27": {
+      "name": "country of citizenship",
+      "description": "person head is a citizen of the country tail",
+      "train_count": 4665,
+      "allowed_pairs": [
+        [
+          "PER",
+          "LOC"
+        ],
+        [
+          "PER",
+          "MISC"
+        ]
+      ]
+    },
+    "P800": {
+      "name": "notable work",
+      "description": "head (person or organization) is notable for the work tail",
+      "train_count": 3055,
+      "allowed_pairs": [
+        [
+          "PER",
+          "MISC"
+        ],
+        [
+          "ORG",
+          "MISC"
+        ],
+        [
+          "PER",
+          "PER"
+        ],
+        [
+          "MISC",
+          "MISC"
+        ]
+      ]
+    },
+    "P175": {
+      "name": "performer",
+      "description": "work head is performed by tail",
+      "train_count": 1773,
+      "allowed_pairs": [
+        [
+          "MISC",
+          "ORG"
+        ],
+        [
+          "MISC",
+          "PER"
+        ],
+        [
+          "PER",
+          "PER"
+        ],
+        [
+          "MISC",
+          "MISC"
+        ]
+      ]
+    },
+    "P161": {
+      "name": "cast member",
+      "description": "film or show head has the cast member tail",
+      "train_count": 919,
+      "allowed_pairs": [
+        [
+          "MISC",
+          "PER"
+        ],
+        [
+          "PER",
+          "PER"
+        ]
+      ]
+    },
+    "P577": {
+      "name": "publication date",
+      "description": "work head was published or released on the date tail",
+      "train_count": 1621,
+      "allowed_pairs": [
+        [
+          "MISC",
+          "TIME"
+        ]
+      ]
+    },
+    "P463": {
+      "name": "member of",
+      "description": "head is a member of the organization tail",
+      "train_count": 1299,
+      "allowed_pairs": [
+        [
+          "PER",
+          "ORG"
+        ],
+        [
+          "LOC",
+          "ORG"
+        ],
+        [
+          "ORG",
+          "ORG"
+        ],
+        [
+          "PER",
+          "MISC"
+        ],
+        [
+          "PER",
+          "LOC"
+        ],
+        [
+          "LOC",
+          "LOC"
+        ]
+      ]
+    },
+    "P569": {
+      "name": "date of birth",
+      "description": "person head was born on the date tail",
+      "train_count": 1172,
+      "allowed_pairs": [
+        [
+          "PER",
+          "TIME"
+        ]
+      ]
+    },
+    "P570": {
+      "name": "date of death",
+      "description": "person head died on the date tail",
+      "train_count": 1000,
+      "allowed_pairs": [
+        [
+          "PER",
+          "TIME"
+        ]
+      ]
+    },
+    "P19": {
+      "name": "place of birth",
+      "description": "person head was born in the place tail",
+      "train_count": 692,
+      "allowed_pairs": [
+        [
+          "PER",
+          "LOC"
+        ]
+      ]
+    },
+    "P495": {
+      "name": "country of origin",
+      "description": "work head originates from the country tail",
+      "train_count": 948,
+      "allowed_pairs": [
+        [
+          "MISC",
+          "LOC"
+        ],
+        [
+          "PER",
+          "LOC"
+        ]
+      ]
+    },
+    "P264": {
+      "name": "record label",
+      "description": "musical work or artist head is signed to the record label tail",
+      "train_count": 923,
+      "allowed_pairs": [
+        [
+          "MISC",
+          "ORG"
+        ],
+        [
+          "PER",
+          "ORG"
+        ],
+        [
+          "ORG",
+          "ORG"
+        ],
+        [
+          "MISC",
+          "MISC"
+        ]
+      ]
+    }
+  },
+  "built_from": {
+    "min_pair_count": 5,
+    "min_pair_share": 0.01,
+    "n_train_docs": 3053
+  }
+}

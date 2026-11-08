@@ -1,0 +1,101 @@
+# ---------------------------------------------------------------------------
+# Single source of truth for the experiment. Use TRAIN for development and DEV
+# for final configuration selection. FREEZE this file (and prompts/, schema/)
+# before accessing TEST.
+# ---------------------------------------------------------------------------
+paths:
+  train: data/Re-DocRED/train_revised.json
+  dev: data/Re-DocRED/dev_revised.json
+  test: data/Re-DocRED/test_revised.json
+  schema: schema/schema.json
+  test_freeze: docs/test_freeze.json
+  raw_dir: outputs/raw
+  results_dir: results
+  annotation_dir: annotation
+  judge_cache: outputs/judge_cache.jsonl
+
+# --- Extractor LLM ---------------------------------------------------------
+extractor:
+  backend: ollama              # ollama | openai_compat | mock (mock = tests only)
+  model: qwen2.5:3b            # compact pilot choice for 6 GiB VRAM; confirm the tag is installed
+  host: http://localhost:11434 # ollama host, or base URL ending in /v1 for openai_compat
+  api_key_env: ""              # openai_compat only: name of env var holding the key
+  temperature: 0
+  seed: 0
+  max_tokens: 6144             # cap selected after pilot found truncation on long outputs
+  num_ctx: 12288               # allow the larger output cap plus the full document prompt
+  timeout_s: 600
+  retries: 2
+  prompt_file: prompts/extract_v1.txt
+  # If true, the relation field is an enum of schema relations, so the model can
+  # never emit an unknown relation and S's 'unknown_relation' check becomes vacuous.
+  constrain_relation_enum: false
+  constrain_entity_types: true
+
+# --- Judge LLM for P (use a DIFFERENT model family than the extractor) -------
+judge:
+  enabled: false              # DEV selection: use C+S; the current judge overfilters
+  backend: ollama
+  model: llama3.2:3b
+  host: http://localhost:11434
+  api_key_env: ""
+  temperature: 0
+  seed: 0
+  max_tokens: 200
+  num_ctx: 4096
+  timeout_s: 300
+  retries: 2
+  prompt_file: prompts/judge_v1.txt
+  context_sentences: 1         # sentences before/after the cited one shown to the judge
+  on_error: reject             # reject | accept  (what to do if the judge output is unusable)
+
+# --- Schema: 10-20 relations chosen from TRAIN (review this list as a team) --
+schema:
+  min_pair_count: 5            # allowed (head_type, tail_type) pair must occur >= this often in train
+  min_pair_share: 0.01         # ... and make up >= this share of the relation's train triples
+  relations:
+    - {id: P17,   name: country,                 description: "head is located in / belongs to the country tail"}
+    - {id: P131,  name: located in admin. entity, description: "head is located in the administrative area tail"}
+    - {id: P150,  name: contains admin. entity,   description: "head contains the administrative area tail as a subdivision"}
+    - {id: P27,   name: country of citizenship,   description: "person head is a citizen of the country tail"}
+    - {id: P800,  name: notable work,             description: "head (person or organization) is notable for the work tail"}
+    - {id: P175,  name: performer,                description: "work head is performed by tail"}
+    - {id: P161,  name: cast member,              description: "film or show head has the cast member tail"}
+    - {id: P577,  name: publication date,         description: "work head was published or released on the date tail"}
+    - {id: P463,  name: member of,                description: "head is a member of the organization tail"}
+    - {id: P569,  name: date of birth,            description: "person head was born on the date tail"}
+    - {id: P570,  name: date of death,            description: "person head died on the date tail"}
+    - {id: P19,   name: place of birth,           description: "person head was born in the place tail"}
+    - {id: P495,  name: country of origin,        description: "work head originates from the country tail"}
+    - {id: P264,  name: record label,             description: "musical work or artist head is signed to the record label tail"}
+
+# --- Matching extracted entities to gold entities (automatic metrics only) ----
+matching:
+  mode: exact                  # match when a normalized predicted mention equals a gold mention
+  jaccard: 0.5
+
+# --- Repair steps ---------------------------------------------------------------
+c:                             # canonicalization (within one document, rule-based)
+  containment: true            # merge a short name into a longer one only if UNAMBIGUOUS (one candidate)
+  min_tokens: 1
+  containment_types: [PER]     # other types merge on exact normalized match only; tune on TRAIN
+s:                             # schema checking
+  drop_self_loops: true
+p:                             # provenance validation
+  min_quote_chars: 8           # alphanumeric characters in the quote
+  require_claimed_sentence: false  # true: quote must be in the sentence given by sent_id
+  require_endpoints_in_quote: false
+
+# --- Evaluation -----------------------------------------------------------------
+eval:
+  sizes: [25, 50, 100, 200]    # nested prefixes of one shuffled pool per split
+  seeds: [0, 1, 2, 3, 4]
+  primary_seed: 0              # CHOOSE BEFORE seeing results; write it in the report
+  primary_n: 200
+
+annotation:
+  n_sample: 100                # unique accepted edges sampled per main stage (proposal protocol)
+  overlap_frac: 0.2            # 20% of deduplicated proposal sample checked by annotator 2
+  seed: 123
+  uncertain: exclude           # exclude | incorrect
+  bootstrap: 2000
