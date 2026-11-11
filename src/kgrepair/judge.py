@@ -46,10 +46,13 @@ class Judge:
         user = (f"Context:\n{ctx}\n\nClaim:\n- head: {head_names[0] if head_names else ''}\n"
                 f"- relation: {rel} ({spec['name']}): {spec['description']}\n"
                 f"- tail: {tail_names[0] if tail_names else ''}\n\nQuote cited by the extractor:\n\"{triple['quote']}\"")
-        key = hashlib.sha1(json.dumps([self.jcfg["model"], self.system, user], sort_keys=True).encode()).hexdigest()
+        cache_settings = {k: self.jcfg.get(k) for k in ('backend','model','host','temperature','seed','max_tokens','num_ctx','context_sentences','on_error')}
+        key = hashlib.sha256(json.dumps([cache_settings, self.system, user], sort_keys=True).encode()).hexdigest()
         if key in self.cache:
             r = self.cache[key]
-            return bool(r["supported"]), r["reason"]
+            if type(r.get('supported')) is bool:
+                return r['supported'], r.get('reason', '')
+            del self.cache[key]
         meta = {"kind": "judge", "doc": doc, "head_names": head_names, "tail_names": tail_names,
                 "relation": rel, "raw_id": triple["raw_id"], "matching": self.cfg.get("matching", {})}
         last = "judge_error"
@@ -61,7 +64,11 @@ class Judge:
                 self.tokens["prompt"] += u.get("prompt_tokens") or 0
                 self.tokens["completion"] += u.get("completion_tokens") or 0
                 obj = json.loads(res["text"])
-                supported, reason = bool(obj["supported"]), str(obj.get("reason", ""))
+                if type(obj.get('supported')) is not bool:
+                    raise ValueError('judge supported field must be a JSON boolean')
+                if not isinstance(obj.get('reason'), str):
+                    raise ValueError('judge reason field must be a string')
+                supported, reason = obj['supported'], obj['reason']
                 rec = {"key": key, "supported": supported, "reason": reason, "model": self.jcfg["model"]}
                 self.cache[key] = rec
                 with open(self.path, "a", encoding="utf-8") as f:

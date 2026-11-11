@@ -156,6 +156,16 @@ def load_raw(path):
     return out
 
 
+def validate_test_raw(cfg, raw, schema, docs):
+    """Prevent evaluation of an incomplete or foreign extraction as the frozen TEST run."""
+    expected = fingerprint(cfg, schema, 'test')
+    if set(raw) != set(range(len(docs))):
+        raise ValueError('TEST evaluation requires one cached record for every TEST document')
+    for doc_id, record in raw.items():
+        if record.get('split') != 'test' or record.get('fingerprint') != expected:
+            raise ValueError(f'TEST raw record {doc_id} has a different split or extractor fingerprint')
+
+
 def run_extract(cfg, split, n, start, out_path, log=print):
     if split == "test":
         from .freeze import assert_test_frozen

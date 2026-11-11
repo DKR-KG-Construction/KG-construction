@@ -140,8 +140,10 @@ def sample_proposal_annotation(cfg, raw_path, split="test", log=print, n_per_sta
     docs = load_split(rpath(cfg, cfg["paths"][split]))
     raw = load_raw(raw_path)
     eval_cfg = cfg["eval"]
+    from .extract import validate_test_raw
+    validate_test_raw(cfg, raw, schema, docs)
     seeds = list(eval_cfg["seeds"])
-    if len(seeds) != 5:
+    if len(seeds) != 5 or len(set(seeds)) != 5:
         raise ValueError(f"proposal annotation requires five sampling seeds; configured {len(seeds)}")
     n_docs = eval_cfg["primary_n"]
     pool = sorted(raw)
@@ -217,18 +219,15 @@ def sample_proposal_annotation(cfg, raw_path, split="test", log=print, n_per_sta
         if ra != rb:
             parent[rb] = ra
 
-    first_by_identity, first_by_source = {}, {}
+    # A shared raw ID can acquire different endpoint names after C. Only identical
+    # displayed claims may share a human label across stages.
+    first_by_identity = {}
     for i, (_, candidate) in enumerate(selected):
         identity = candidate["identity"]
         if identity in first_by_identity:
             union(i, first_by_identity[identity])
         else:
             first_by_identity[identity] = i
-        for rid in candidate["source_raw_ids"]:
-            if rid in first_by_source:
-                union(i, first_by_source[rid])
-            else:
-                first_by_source[rid] = i
     groups = {}
     for i, (stage, candidate) in enumerate(selected):
         group = groups.setdefault(find(i), {"candidates": [], "sampled_for_stages": set(),
@@ -274,6 +273,8 @@ def sample_proposal_annotation(cfg, raw_path, split="test", log=print, n_per_sta
     n_overlap = round(overlap_share * len(items))
     overlap_ids = set(rng.sample([row["item_id"] for row in items], n_overlap)) if n_overlap else set()
     out = pathlib.Path(out_dir) if out_dir else pathlib.Path(rpath(cfg, cfg["paths"]["annotation_dir"])) / "proposal_test"
+    if any((out / name).exists() for name in ('annotator1.csv', 'annotator2.csv', 'key.json')):
+        raise ValueError(f'Annotation sample already exists in {out}; use a new output directory to preserve labels')
     out.mkdir(parents=True, exist_ok=True)
     _write_proposal(out / "annotator1.csv", items)
     _write_proposal(out / "annotator2.csv", [row for row in items if row["item_id"] in overlap_ids])
@@ -321,29 +322,44 @@ def score_proposal_annotation(cfg, sample_dir, labels_path, labels2_path, log=pr
     sample_dir = pathlib.Path(sample_dir)
     with open(sample_dir / "key.json", encoding="utf-8") as f:
         key = json.load(f)
+    if key.get('split') == 'test':
+        from .freeze import assert_test_frozen
+        assert_test_frozen(cfg)
 
     def read(path):
         result = {}
         with open(path, newline="", encoding="utf-8-sig") as f:
-            for row in csv.DictReader(f):
+            reader = csv.DictReader(f)
+            if not {'item_id', 'label'} <= set(reader.fieldnames or []):
+                raise ValueError(f"{path}: required columns are item_id and label")
+            for row in reader:
+                item_id = (row.get('item_id') or '').strip()
+                if not item_id or item_id in result:
+                    raise ValueError(f"{path}: empty or duplicate item_id {item_id!r}")
                 label = (row.get("label") or "").strip().lower()
-                if label and label not in VALID:
+                if label not in VALID:
                     raise ValueError(f"{path}: item_id {row.get('item_id')} has invalid label {label!r}")
-                result[row["item_id"]] = label
+                result[item_id] = label
         return result
 
     labels = read(labels_path)
     expected = {item["item_id"] for item in key["items"]}
     if expected - labels.keys():
         raise ValueError(f"annotator 1 is missing {len(expected - labels.keys())} proposal sample labels")
-    labels2 = read(labels2_path) if labels2_path and pathlib.Path(labels2_path).exists() else {}
+    if labels.keys() - expected:
+        raise ValueError("annotator 1 file contains unexpected items")
     expected_overlap = set(key["overlap_item_ids"])
+    if expected_overlap and (not labels2_path or not pathlib.Path(labels2_path).is_file()):
+        raise ValueError("annotator 2 overlap labels are required")
+    labels2 = read(labels2_path) if labels2_path and pathlib.Path(labels2_path).exists() else {}
     if expected_overlap - labels2.keys():
         raise ValueError(f"annotator 2 is missing {len(expected_overlap - labels2.keys())} overlap labels")
     if labels2.keys() - expected_overlap:
         raise ValueError("annotator 2 file contains items outside the assigned 20% overlap")
 
     policy = cfg["annotation"]["uncertain"]
+    if policy not in ('exclude', 'incorrect'):
+        raise ValueError(f"unknown uncertain-label policy: {policy!r}")
     normalized = {item_id: ("incorrect" if label == "uncertain" and policy == "incorrect" else label)
                   for item_id, label in labels.items()}
     usable = {item_id for item_id, label in normalized.items() if label in ("correct", "incorrect")}
@@ -360,6 +376,8 @@ def score_proposal_annotation(cfg, sample_dir, labels_path, labels2_path, log=pr
         stage_rows.append({
             "config": stage, "sampled_unique_edges": len(stage_items), "labeled_edges": len(known),
             "correct": correct, "precision": p, "wilson_lo": lo, "wilson_hi": hi,
+            "uncertain": sum(labels[item['item_id']] == 'uncertain' for item in stage_items),
+            "provenance_mode": "quote_and_judge" if key.get('judge_enabled') else "quote_only",
             "boot_lo": boot_lo, "boot_hi": boot_hi,
             "automatic_retention_across_seed_runs": key["automatic_retention_across_seed_runs"][stage],
             "sample_retention_vs_raw": None,
@@ -367,11 +385,12 @@ def score_proposal_annotation(cfg, sample_dir, labels_path, labels2_path, log=pr
         })
     raw_items = [item for item in key["items"]
                  if "raw" in item["sampled_for_stages"] and item["item_id"] in usable]
+    all_raw_items = [item for item in key['items'] if 'raw' in item['sampled_for_stages']]
     for row in stage_rows:
         stage = row["config"]
         row["sample_retention_vs_raw"] = (
-            sum(item["kept_by_stage"][stage] for item in raw_items) / len(raw_items)
-            if raw_items else float("nan")
+            sum(item["kept_by_stage"][stage] for item in all_raw_items) / len(all_raw_items)
+            if all_raw_items else float("nan")
         )
         correct_raw = [item for item in raw_items if normalized[item["item_id"]] == "correct"]
         removed = sum(not item["kept_by_stage"][stage] for item in correct_raw)
@@ -390,6 +409,9 @@ def score_proposal_annotation(cfg, sample_dir, labels_path, labels2_path, log=pr
         agreement = sum(x == y for x, y in overlap_pairs) / len(overlap_pairs)
         log(f"Annotator agreement: n={len(overlap_pairs)}, raw={agreement:.1%}, "
             f"Cohen's kappa={cohen_kappa(list(a), list(b)):.3f}")
+        for row in stage_rows:
+            row.update(overlap_n=len(overlap_pairs), agreement=agreement,
+                       cohen_kappa=cohen_kappa(list(a), list(b)))
     else:
         log("Annotator agreement: no completed labels on overlap")
     log(f"Uncertain labels: {sum(label == 'uncertain' for label in labels.values())} "

@@ -1,26 +1,39 @@
-# Interim report — TRAIN and DEV results, limitations, and next steps
+# Verified local status (2026-11-10)
 
-This report summarizes the preliminary TRAIN pilot and completed DEV automatic comparison. It is
-not the final evaluation: proposal-compliant manual annotation and the held-out TEST run remain
-incomplete. The workflow is to develop on TRAIN, select and freeze the configuration on DEV, and
-only then access TEST. The DEV rejection audit below used an AI reviewer and is exploratory, not
-independent human annotation.
+The sections below are historical development notes. Their statements that TEST data,
+a freeze manifest, or TEST outputs are absent have been superseded by this verification.
+For current progress and remaining tasks, use the verified status above. Historical claims and
+commands in the earlier interim report must not be used as the current run instructions.
 
-## Current verified state
+- The existing TEST freeze validates against the current configuration, prompt, schema,
+  and dataset. All 500 cached records have the frozen extractor fingerprint.
+- Of 500 responses, 356 parse normally, 89 recover complete prefixes, and 55 remain
+  unparseable. Failed responses remain in the evaluation population with no extracted edges.
+- Cached-output evaluation was verified under `results/test_verified/`: all eight
+  configurations, four nested sizes, and five seeds. This uses the original cached
+  responses and does not rerun the extractor or select a new configuration.
+- `rejections.jsonl` records rejected raw IDs with document, configuration, stage, and reason.
+  `run_metadata.json` records the provenance mode, fingerprints, parsing counts, and sampling settings.
+- P is **quote-existence-only** in this frozen experiment. Full proposal P also requires
+  support validation; the judge implementation exists but is disabled after the DEV comparison.
+  The current experiment must be reported with that deviation. TEST results cannot justify
+  changing the judge or selecting a replacement configuration. Any further method development
+  belongs on TRAIN/DEV and requires an explicitly documented follow-up experiment.
+- The existing manual sample has 100 accepted triples per main stage, 375 distinct annotation
+  rows, and 75 overlap rows. Primary labels remain blank. Manual precision and annotator
+  agreement are pending independent human annotation.
+- Scoring now rejects blank, duplicate, unexpected, and missing assigned labels. Retention
+  includes uncertain items; manual precision follows the configured uncertain-label policy.
+  Per-stage uncertainty counts, provenance mode, and overlap agreement are saved with scores.
+- The final code verification is recorded in the change report; the historical tests and
+  machine/repository descriptions below describe the earlier development environment.
 
-- Re-DocRED was downloaded from the pinned commit in `scripts/download_data.sh`; all three SHA-256 checks passed.
-- `schema/schema.json` was generated from TRAIN only using the 14 relations configured in `config.yaml`. The data has six coarse entity types: `LOC`, `MISC`, `NUM`, `ORG`, `PER`, and `TIME`.
-- The default automatic entity match is exact overlap after normalizing mention strings. Confirm that this matches the submitted proposal before presenting results.
-- The real local model `qwen2.5:3b` ran on the RTX 4050 Laptop GPU. Ollama reports model ID `357c53fb659c`, model size 1.9 GB, GPU processor 100%, and Ollama version `0.40.11`.
-- The offline suite passes in the pinned environment: 16 tests passed, including a regression fix for freezing configurations whose config file is outside the repository root. These tests use `MockBackend`, which reads gold labels; **their numbers are not project results and must not be reported as model metrics**.
-- The extractor (`qwen2.5:3b`) and a different-family judge (`llama3.2:3b`) are installed locally. The selected TRAIN pilot used quote-rule P with the LLM judge disabled. A separate corrected-context judge-assisted comparison has since been completed on DEV and is summarized below.
-- The selected 50-document TRAIN run used `qwen2.5:3b`, `max_tokens=6144`, and `num_ctx=12288`. Raw responses are in `outputs/raw/train_baseline_6144.jsonl`; main-stage metrics are in `results/pilot_metrics.csv` and all-eight-stage metrics recomputed with current parsing are in `results/train_6144_reparsed/`. Fifteen outputs reached the 6,144-token cap. Ten were safely recovered as partial JSON because their entity arrays were complete; five remain unrecoverable because the entity list was truncated (doc IDs 4, 9, 22, 33, 38). Metrics use only complete decoded triple objects from recovered responses. It produced 1,048 parsed triples across 45 usable documents; 5 documents have no parsed graph. Quotes were found in the document for 70.8% of triples and in the claimed sentence for 53.0%. Mean latency was 43.0 s/doc; usage totaled 43,890 prompt and 128,243 completion tokens (local model; no API charge).
-- For n=50 all five configured seeds use the same complete pool, so across-seed standard deviations are zero and do not represent sampling uncertainty. At n=25, the seeds produce different subsets.
-- DEV automatic evaluation is complete for 200 documents and five configured seeds. It compares C+S, C+S+P with the quote-existence rule only, and C+S+P with the corrected-context LLM judge. The judge-assisted setting retained fewer than 0.1% of raw triples on average; see the DEV table below.
-- Based on the DEV automatic comparison, the selected configuration is C+S without P; `judge.enabled` is now false. This is a DEV-based selection, not a TEST result. TEST has not been run or accessed.
-- The DEV rejection audit reviewed 812 unique C+S edges rejected by the original cached judge, with zero tool errors. It used a local AI model, not human annotators; 528/812 cases (65.0%) were uncertain on at least one of the two labels.
-- `bash run.sh annotate-train outputs/raw/train_baseline_6144.jsonl` prepared a 50-triple TRAIN pilot sample for all three annotators; `annotation/annotator1.csv`, `annotator2.csv`, and `annotator3.csv` have no labels entered. A separate 30-triple calibration sample is prepared under `annotation/calibration/`; its annotator CSVs are also blank. These are pilot/calibration materials, not the proposal's final evaluation sample.
-- A prompt revision was tested to request only triple-endpoint entities, unique surface forms, and compact JSON. On the five previously unrecoverable TRAIN docs at 6,144 tokens, it parsed three fully, recovered one partially, and failed on doc 4; raising the cap to 8,192 did not fix docs 4 or 22. A 50-doc run of that revision was stopped after 16 docs: 12 parsed, 1 was partially recovered, and 4 were unparseable. That incomplete trial is retained at `outputs/raw/train_baseline_prompt_v2_8192.jsonl` for diagnosis only. The original prompt/6,144-token baseline remains selected. Parser normalization now removes duplicate mention strings; `results/pilot_metrics.csv` and `results/train_6144_reparsed/` were recomputed from the selected baseline using current parsing.
+# Historical TRAIN and DEV preliminary evidence
+
+The tables below preserve the earlier development evidence. Local raw TRAIN/DEV files
+are absent from this checkout, so their reported values cannot be independently recomputed
+here. The TEST artifacts and annotation sample in the verified status above are present.
+These development results motivated selecting C+S and disabling the judge before TEST.
 
 ## Preliminary model results
 
@@ -85,43 +98,15 @@ false-rejection accuracy: labels are AI-generated, many are uncertain, and no in
 adjudication has been completed. Treat the audit as exploratory context only, not as proposal
 annotation or a precision estimate. Its CSV and raw DEV artifacts are local, Git-ignored files.
 
-## Blockers and actions already tried
+## Remaining midway work
 
-| Blocker | Evidence / attempted action | Next action |
-|---|---|---|
-| Git repository boundary | The original working tree is nested under the user profile and the saved Copilot project mapping referred to the wrong GitHub owner. A clean local snapshot was prepared without Git metadata or generated artifacts; no files were pushed. |
-| Output truncation and runtime | Fifteen of 50 outputs reached `max_tokens=6144`; ten were salvaged as complete triple prefixes and five remain unrecoverable because their entity lists were incomplete. The tested prompt revision was worse (4/16 unparseable), so it was not adopted. Mean latency for the selected run is 43.0 seconds/doc. | Present the selected 50-document baseline with the truncation limitation disclosed. Any further prompt/model experiment must use TRAIN and a fresh raw-output path. |
-| `S` may be weak with coarse types | On this TRAIN sample, C+S retained 217 of 1,048 raw triples (C+S+P retained 178); TRAIN-derived schema uses six broad types. | Ask TA whether these coarse types support a meaningful schema filter. |
-| Human quality evidence is missing | The 30-triple calibration sample and 50-triple TRAIN pilot annotation files are prepared, but all annotator CSVs are blank. | Calibrate and freeze the guidelines, then complete the proposal's final manual evaluation on TEST before reporting human metrics. |
-| TEST setup is not frozen | C+S without P is selected from DEV and `judge.enabled` is false, but the TEST data is not included in this clean snapshot and no freeze manifest exists. | Confirm the proposal protocol and exact config on the working machine, then run `bash run.sh freeze-test` before any TEST extraction. Do not access TEST until this freeze is approved. |
-| Proposal matching and uncertainty choices need confirmation | The available chat summary says mention overlap; the implementation now uses exact normalized mention overlap. `annotation.uncertain` is currently `exclude`. | Compare the matching rule to the submitted proposal and ask TA how `uncertain` should enter the denominator. |
-| Final TEST result is not run | No TEST freeze, raw TEST output, TEST metrics, or completed proposal annotation sample has been verified. | After the configuration freeze, run the prescribed five-seed, 200-document TEST evaluation once. Do not use TEST for configuration decisions or present TRAIN/DEV automatic metrics as final/held-out results. |
-| Proposal manual-precision sample remains outstanding | The prepared 50-triple TRAIN sample is only a pilot; the 30-triple calibration set is separate, and neither has labels. | On the combined five-seed, 200-document TEST runs, manually assess 100 unique accepted triples per main stage (`raw`, `C`, `C+S`, `C+S+P`), balanced across seeds when possible. A second annotator checks 20%; cross-stage duplicate triples are labelled once. Report precision with an interval, retention, and correct raw facts removed. |
-| Final GitHub repository is not initialized | The supplied `DKR-KG-Construction/KG-construction` repository is accessible but has no commits or branches. The prior Copilot project mapping refers to a different owner. | Reconnect the project to the intended repository, review the staged file list, and create/push only after approval. No push has been made. |
+Complete the independent annotation using `docs/annotation_guidelines.md` and
+`annotation/proposal_test/docs.txt`. Annotator 1 labels all 375 assigned items; annotator 2
+labels the assigned 75 overlap items. Keep `key.json` private to scoring.
+After both files are complete, run `bash run.sh proposal-score`.
 
-## TA questions
-
-1. Are Re-DocRED's six coarse entity types sufficient for a meaningful `S` step?
-2. Should `uncertain` annotations be excluded from the denominator or counted as incorrect?
-3. Should the primary metric use a separately preselected seed, or is the configured seed sufficient?
-
-## Commands for the next run
-
-The local models are installed; the 50-document TRAIN pilot and 200-document DEV comparison have
-run. This report does not claim proposal-compliant manual or final TEST results. Remaining work:
-resolve any required proposal/TA decisions, freeze the selected configuration and annotation
-guidelines, run the prescribed TEST evaluation once, and complete human annotation/scoring. To
-recreate TRAIN pilot annotation samples:
-
-```bash
-bash run.sh test
-bash run.sh data
-bash run.sh annotate-train outputs/raw/train_baseline_6144.jsonl
-bash run.sh annotate-calibration outputs/raw/train_baseline_6144.jsonl
-```
-
-Calibrate on the separate files first; only after the guidelines are frozen should annotators label
-the final proposal sample. After labels are complete, run the appropriate scoring command.
-`train-baseline` can be extended to larger
-TRAIN-only samples if time allows. Generated data, responses, labels, and results are local and
-Git-ignored.
+The midway presentation can use the TRAIN/DEV preliminary tables above with their historical
+status disclosed, and the verified automatic TEST results under `results/test_verified/`.
+Manual precision and agreement remain pending; quote-only P and parsing failures must be
+reported alongside the results. Further tuning on the existing TEST results is not part of
+this annotation workflow.

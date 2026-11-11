@@ -2,12 +2,13 @@
 Automatic precision is a LOWER bound (gold is incomplete, entity matching is heuristic);
 the manual study is the primary metric."""
 import csv
+import json
 import pathlib
 import random
 
 from .config import rpath
 from .data import gold_triples, load_split
-from .extract import load_raw
+from .extract import load_raw, validate_test_raw
 from .judge import Judge
 from .matching import map_entities
 from .pipeline import ALL_FLAGS, MAIN, DocRun, config_name
@@ -61,7 +62,7 @@ def aggregate(counts_list):
     prec = s["correct_edges"] / E if E else float("nan")
     uprec = s["tp_unique"] / E if E else float("nan")
     rec = s["tp_unique"] / s["gold"] if s["gold"] else float("nan")
-    f1 = 2 * uprec * rec / (uprec + rec) if E and (uprec + rec) > 0 else float("nan")
+    f1 = (2 * uprec * rec / (uprec + rec) if (uprec + rec) > 0 else 0.0) if E and s['gold'] else float("nan")
     ret = s["kept_raw"] / s["raw_total"] if s["raw_total"] else float("nan")
     crem = s["correct_removed"] / s["raw_correct"] if s["raw_correct"] else float("nan")
     return {**s, "precision": prec, "unique_precision": uprec, "recall": rec, "f1": f1,
@@ -75,11 +76,16 @@ def evaluate_all(cfg, raw_path, split="dev", configs="all", log=print, use_judge
     schema = load_schema(cfg)
     docs = load_split(rpath(cfg, cfg["paths"][split]))
     raw = load_raw(raw_path)
+    if split == 'test':
+        validate_test_raw(cfg, raw, schema, docs)
+    provenance_mode = 'quote_and_judge' if use_judge and cfg['judge'].get('enabled', True) else 'quote_only'
+    log(f'P provenance mode: {provenance_mode}')
     pool = sorted(raw)
     judge = Judge(cfg, schema) if use_judge and cfg["judge"].get("enabled", True) else None
     flags = ALL_FLAGS if configs == "all" else [f for f in ALL_FLAGS if config_name(*f) in MAIN]
     rels = set(schema["relations"])
     per_doc = {}
+    audit = []
     for n, doc_id in enumerate(pool, 1):
         doc, rec = docs[doc_id], raw[doc_id]
         run = DocRun(doc, rec["parsed"], schema, cfg, judge)
@@ -88,6 +94,8 @@ def evaluate_all(cfg, raw_path, split="dev", configs="all", log=print, use_judge
         rc = raw_correct(run, ent_map, gold)
         for f in flags:
             res = run.run(*f)
+            audit.extend({'doc_id': doc_id, 'config': res['name'], **rejection}
+                         for rejection in res['rejected'])
             c = eval_doc(run, res, ent_map, gold, rc)
             c["parse_fail"] = int(rec["parsed"] is None)
             c["parse_recovered"] = int(rec.get("parse_error") == "partial_json_recovered")
@@ -96,6 +104,16 @@ def evaluate_all(cfg, raw_path, split="dev", configs="all", log=print, use_judge
             log(f"  evaluated {n}/{len(pool)} docs" + (f" (judge calls so far: {judge.calls})" if judge else ""))
     res_dir = pathlib.Path(results_dir) if results_dir else pathlib.Path(rpath(cfg, cfg["paths"]["results_dir"]))
     res_dir.mkdir(parents=True, exist_ok=True)
+    with open(res_dir / 'rejections.jsonl', 'w', encoding='utf-8') as stream:
+        for entry in audit:
+            stream.write(json.dumps(entry, ensure_ascii=False) + '\n')
+    with open(res_dir / 'run_metadata.json', 'w', encoding='utf-8') as stream:
+        json.dump({'split': split, 'provenance_mode': provenance_mode,
+                   'raw_fingerprints': sorted({str(r.get('fingerprint')) for r in raw.values()}),
+                   'n_documents': len(raw),
+                   'parse_failures': sum(r['parsed'] is None for r in raw.values()),
+                   'partial_recoveries': sum(r.get('parse_error') == 'partial_json_recovered' for r in raw.values()),
+                   'eval': cfg['eval']}, stream, indent=2)
     names = [config_name(*f) for f in flags]
     rows = []
     for seed in cfg["eval"]["seeds"]:

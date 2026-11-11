@@ -1,109 +1,88 @@
-# LLM-assisted KG construction with a precision budget
+# LLM-Assisted Knowledge Graph Construction with a Precision Budget
 
-How much do three repair steps improve a knowledge graph extracted by an LLM, and how many correct
-facts do they throw away? Dataset: [Re-DocRED](https://github.com/tonytan48/Re-DocRED) (Tan et al., EMNLP 2022).
+This project measures how repair steps change the precision of an LLM-extracted knowledge
+ graph and how much correct content they remove. It uses the official Re-DocRED splits,
+ a pretrained local extractor, cached responses, and independent manual annotation.
+ There is no model training or fine-tuning.
 
-* **raw** – the LLM's output, one call per document, saved once and reused by every configuration
-* **C** – canonicalization: merge aliases of one entity inside a document (rules, no LLM)
-* **S** – schema checking: unknown relation, missing entity, unknown type, self-loop, wrong direction, incompatible endpoint types
-* **P** – provenance: the quote must exist in the document (rule), then an LLM judge (different model family) must find it supports the claim
+## Current status
 
-Main comparison `raw, C, C+S, C+S+P`; secondary ablation: all 8 combinations. Every rejected item is logged with a reason.
+The midway experiment has completed automatic TEST evaluation and two-person manual annotation.
+The extractor is `qwen2.5:3b`. The DEV-selected configuration is **C+S**; the optional
+`llama3.2:3b` provenance judge is disabled in the frozen experiment.
 
-## Run the selected project from a clean checkout
+The main comparison is `raw`, `C`, `C+S`, and `C+S+P`; automatic evaluation also covers all
+eight C/S/P combinations. Each document is extracted once, and its saved response is reused.
 
-This is the single recommended path for a new team member to reproduce the **DEV-selected final
-experiment**. It uses the pretrained `qwen2.5:3b` model; **there is no model training or
-fine-tuning**. The repository includes the TRAIN-derived schema, selected configuration, and TEST
-freeze manifest. The selected primary configuration is C+S. The P ablation in the proposal
-sample is quote-existence-only because the LLM judge is disabled.
+| Stage | Operation |
+|---|---|
+| raw | Parsed extractor output before repairs |
+| C | Within-document alias merging using normalized names and unambiguous person-name containment |
+| S | Structural and schema checks, including relation validity, endpoints, direction, and allowed type pairs |
+| P | Quote-existence validation in the current experiment; optional LLM support validation is implemented |
 
-### 1. Install prerequisites
+**Protocol limitation:** the proposal describes P as checking both quotation existence and
+support for the relation. The reported P ablation checks quote existence only. It must be
+reported as `quote_only`, rather than full support validation. C+S was selected using DEV;
+the manual TEST results below do not change that selection.
 
-Install Python 3.11+, Git for Windows (including Git Bash), and Ollama. Open Git Bash and clone
-the repository:
+## Manual results
 
-```bash
-git clone https://github.com/DKR-KG-Construction/KG-construction.git
-cd KG-construction
-```
+The primary annotator completed 375 distinct items, sampled as 100 accepted triples per main
+stage from the combined five-seed, 200-document TEST runs. Cross-stage duplicate claims were
+labelled once. The second annotator independently checked 75 items (20% overlap).
 
-Create the Python environment, install dependencies, and run offline tests:
+| Stage | Correct / determinate labels | Manual precision | 95% Wilson interval | Raw-sample retention | Correct raw facts removed |
+|---|---:|---:|---:|---:|---:|
+| raw | 4 / 98 | 4.1% | 1.6-10.0% | 100% | 0 / 4 |
+| C | 13 / 97 | 13.4% | 8.0-21.6% | 100% | 0 / 4 |
+| C+S | 23 / 100 | 23.0% | 15.8-32.2% | 25% | 1 / 4 |
+| C+S+P (quote only) | 35 / 100 | 35.0% | 26.4-44.7% | 23% | 1 / 4 |
 
-```bash
-python -m venv .venv
-source .venv/Scripts/activate
-python -m pip install -r requirements.lock
-bash run.sh test
-```
+Five uncertain labels (two raw, three C) are excluded from precision denominators under the
+frozen `annotation.uncertain: exclude` policy. Agreement is **73/75 (97.3%)**, with
+**Cohen's kappa = 0.917**. Primary labels determine precision; secondary labels measure
+agreement and are not automatically substituted or adjudicated.
 
-Download and verify the pinned Re-DocRED data, then download the configured local model. Ollama
-must be running; if needed, start it in a separate terminal before pulling the model:
+Measured precision increases across the sampled stages while schema and provenance filtering
+remove substantial content. Only four raw-sample facts were labelled correct, so the 25%
+correct-removal estimate is based on one fact and is highly uncertain. Stage samples are not
+fully paired; these point estimates alone do not establish a statistically significant
+improvement between stages.
 
-```bash
-bash run.sh data
-ollama pull qwen2.5:3b
-```
+These values come from the local `results/proposal_manual_summary.csv`. Raw annotations and
+generated results are Git-ignored; this table preserves the aggregate results in the repository.
+The [midway report](docs/midway_check.md) contains earlier TRAIN/DEV evidence and experiment
+context; its annotation-pending status describes the period before this scoring run.
 
-### 2. Run the frozen TEST evaluation
+## Automatic evaluation and limitations
 
-Do not run `pilot`, `train-baseline`, `extract-dev`, `evaluate-dev`, or `build-schema` in this
-reproduction path. They are development commands and can regenerate artifacts used by the frozen
-experiment. Do not edit `config.yaml`, `prompts/extract_v1.txt`, or `schema/schema.json`.
-The checked-in `docs/test_freeze.json` records their approved hashes/settings; TEST commands
-validate it and stop if those inputs have changed.
+- Official splits: 3,053 TRAIN, 500 DEV, and 500 TEST documents. A schema of 14 relations and
+  six entity types is derived from TRAIN. Gold labels are never included in real-model prompts.
+- TEST uses nested samples of 25, 50, 100, and 200 documents with five seeds: 0-4. This produces
+  160 metric rows across eight configurations. Seed 0 at 200 documents is the configured
+  primary automatic run; manual precision is the primary quality measure.
+- All 500 TEST responses are cached: 356 parse normally, 89 recover complete prefixes, and
+  55 remain unparseable. Failed responses contribute no extracted edges but remain in the
+  document population. Partial recovery can omit facts and affects interpretation.
+- Automatic matching uses exact normalized mention overlap against gold restricted to schema
+  relations. Incomplete gold and heuristic entity matching limit automatic precision estimates.
+  Automatic F1 uses unique-triple precision to penalize duplicate predictions.
+- Raw-sample retention above measures whether sampled raw facts remain represented, counting
+  merged facts as retained. The scoring CSV also reports aggregate graph-edge retention across
+  seed runs; deduplication can reduce that measure even when no raw facts disappear.
+- Samples overlap across seeds and items can share documents, so seed variation and item-level
+  confidence intervals do not capture every source of uncertainty.
+- Public Wikipedia-derived text may overlap with model pretraining. Model/runtime versions
+  can also affect regenerated responses despite deterministic generation settings.
 
-Extract TEST outputs (resumable; this may take a long time):
+## Install
 
-```bash
-bash run.sh extract-test
-```
+Requirements: Python 3.11+, Git, Git Bash for the shell runner, and Ollama for new LLM extraction.
+Ollama is not needed to score existing annotation files or evaluate cached outputs with the
+current judge-disabled configuration.
 
-When extraction completes successfully, evaluate the configured five seeds and sample the
-proposal annotation items:
-
-```bash
-bash run.sh evaluate-test
-bash run.sh proposal-sample
-```
-
-### 3. Complete the two-person annotation
-
-The sample is written under `annotation/proposal_test/`. The primary annotator completes every
-row in `annotator1.csv`; the second annotator completes only the rows in `annotator2.csv` (the
-20% overlap). Both annotators use `docs.txt` and the agreed [`docs/annotation_guidelines.md`](docs/annotation_guidelines.md).
-Label each row `correct`, `incorrect`, or `uncertain`; add a short note for incorrect/uncertain
-cases. Do not change the CSV headers or item IDs. Do not show either annotator `key.json`, which
-contains the stage mapping and is only for scoring.
-
-Share the annotation CSVs and `docs.txt` with the annotators using your team's approved method.
-After both files are completed and returned to `annotation/proposal_test/`, score them:
-
-```bash
-bash run.sh proposal-score
-```
-
-The command reports per-stage manual precision and intervals, retention, correct raw facts
-removed, uncertain-label count, and agreement on the double-labelled overlap. It writes
-`results/proposal_manual_summary.csv`. Annotation files and generated results are local and
-Git-ignored; share/publish them only if your team and data policy permit.
-
-`requirements.txt` lists direct dependencies; `requirements.lock` pins the tested environment.
-For the earlier TRAIN/DEV decision evidence and limitations, see
-[`docs/midway_check.md`](docs/midway_check.md). This clean-checkout workflow reproduces the
-selected experiment; it does not rerun the historical DEV selection.
-
-## Developer path: reproduce and extend the experiment
-
-Follow this full path when you are a developer starting from a fresh clone and want to rebuild
-the TRAIN/DEV evidence, choose a configuration, and then run TEST. This is separate from the
-selected-run instructions above. It uses pretrained Ollama models—**there is no model training
-or fine-tuning**. Do not start this path while another TEST evaluation is running in the same
-checkout.
-
-### A. Clone and install
-
-Install Python 3.11+, Git, and Ollama. Open Git Bash and run:
+From Git Bash on Windows:
 
 ```bash
 git clone https://github.com/DKR-KG-Construction/KG-construction.git
@@ -112,176 +91,115 @@ python -m venv .venv
 source .venv/Scripts/activate
 python -m pip install -r requirements.lock
 bash run.sh test
+```
+
+On Linux/macOS, activate with `source .venv/bin/activate`. Direct dependencies are in
+`requirements.txt`; `requirements.lock` pins the environment. Tests use synthetic data and mock
+models; HTTP backend checks use a local fake server. Test outputs are not experimental results.
+
+## Reproduce the frozen experiment from a clean checkout
+
+The repository includes the selected configuration, prompts, TRAIN schema, and TEST freeze
+manifest. Dataset files and generated artifacts must be obtained or recreated separately.
+Run the following from Git Bash with the environment activated and Ollama running:
+
+```bash
 bash run.sh data
 ollama pull qwen2.5:3b
-ollama pull llama3.2:3b
-```
-
-Keep Ollama running. The extractor is `qwen2.5:3b`; the optional provenance judge is
-`llama3.2:3b`.
-
-### B. Build the TRAIN schema and run TRAIN development
-
-Run these commands in order:
-
-```bash
-bash run.sh pilot
-bash run.sh train-baseline 200 outputs/raw/train_baseline.jsonl
-```
-
-`pilot` builds `schema/schema.json` from TRAIN and runs a 10-document smoke-test pilot.
-`train-baseline` extracts 200 TRAIN documents and evaluates the configured nested sizes and
-seeds. These steps generate local files under `outputs/` and `results/`; they do not alter model
-weights. Complete any optional TRAIN annotation calibration separately, before final TEST
-annotation.
-
-### C. Extract DEV once and compare configurations
-
-Extract DEV once. Reuse this same raw extraction for both judge settings:
-
-```bash
-bash run.sh extract-dev
-```
-
-First evaluate with the checked-in setting (`judge.enabled: false`), which means P ablations
-use quote-existence validation only:
-
-```bash
-PYTHONPATH=src python -m kgrepair evaluate --raw outputs/raw/dev.jsonl --split dev \
-  --out-dir results/dev_quote_only
-```
-
-Next, make a temporary config copy with the LLM judge enabled and evaluate the same DEV output.
-The commands below do not change `config.yaml`:
-
-```bash
-cp config.yaml config_judge.yaml
-python -c "import yaml; from pathlib import Path; p=Path('config_judge.yaml'); c=yaml.safe_load(p.read_text(encoding='utf-8')); c['judge']['enabled']=True; p.write_text(yaml.safe_dump(c, sort_keys=False), encoding='utf-8')"
-PYTHONPATH=src python -m kgrepair --config config_judge.yaml evaluate \
-  --raw outputs/raw/dev.jsonl --split dev --out-dir results/dev_with_judge
-rm config_judge.yaml
-```
-
-Compare `results/dev_quote_only/auto_summary.csv` with
-`results/dev_with_judge/auto_summary.csv`. Select the final setup using the proposal's
-pre-specified criterion—not TEST. The current project selection is C+S with P disabled and
-`judge.enabled: false`; the DEV comparison and exploratory AI audit are documented in
-[`docs/midway_check.md`](docs/midway_check.md).
-
-### D. Freeze the chosen setup before TEST
-
-Set `config.yaml` to the selected final values. Make sure the final TEST data is downloaded and
-verified, then write the freeze manifest:
-
-```bash
-bash run.sh data
-bash run.sh freeze-test
-```
-
-Review and commit the final `config.yaml`, prompt/schema if changed, and `docs/test_freeze.json`
-before running TEST. Once frozen, do not edit these files. If you deliberately change the
-configuration, prompt, or schema, review the DEV evidence and run `bash run.sh freeze-test`
-again before TEST.
-
-### E. Run TEST, create the manual sample, and score annotation
-
-With the same checkout and unchanged frozen inputs:
-
-```bash
 bash run.sh extract-test
 bash run.sh evaluate-test
 bash run.sh proposal-sample
 ```
 
-After the proposal sample is generated, follow section 3 above: the primary annotator completes
-`annotation/proposal_test/annotator1.csv`; the second annotator completes the 20% overlap in
-`annotator2.csv`; neither sees `key.json`. Then score:
+Data downloads are pinned and checked against SHA-256 checksums. Extraction is resumable and
+may take a long time. TEST commands validate the existing freeze and extraction fingerprints.
+Keep the frozen settings unchanged when reproducing this experiment. A freeze mismatch needs
+investigation; regenerating the manifest does not establish that an altered run is equivalent.
+
+Evaluation writes `auto_metrics.csv` (each seed), `auto_summary.csv`, `per_doc.csv`,
+`rejections.jsonl`, and `run_metadata.json` under `results/test/`. The existing local verification
+run is under `results/test_verified/`. Rejections include source IDs, stage, and reason;
+metadata identifies the provenance mode and parsing counts.
+
+A new extraction or sample requires new manual labels; the table above is not guaranteed to be
+reproduced by rerunning the model. Sampling refuses to overwrite existing proposal annotation
+files. Preserve completed annotations rather than regenerating their sample.
+
+## Annotation and scoring
+
+The completed local sample is under `annotation/proposal_test/`:
+
+- `annotator1.csv`: all 375 primary items.
+- `annotator2.csv`: the assigned 75-item independent overlap.
+- `docs.txt`: source documents used for judging claims.
+- `key.json`: private stage mapping used by scoring; keep it hidden from annotators.
+
+Follow [the annotation guidelines](docs/annotation_guidelines.md). Judge claims against the full
+source document, fill only `label` and `notes`, and preserve IDs and evidence columns. Labels
+are `correct`, `incorrect`, or `uncertain`. An incorrect quote alone does not invalidate a fact
+supported elsewhere in the document. Preserve original independent labels before discussing
+any disagreements.
+
+To rescore the completed files in Git Bash:
 
 ```bash
 bash run.sh proposal-score
 ```
 
-Generated data, model responses, annotation sheets, and result files are local and Git-ignored.
-Share annotation materials with teammates through your approved channel; do not commit them
-unless the team explicitly approves. This workflow reproduces the experiment structure, but
-LLM outputs and resulting metrics may vary with model/runtime versions. The committed historical
-DEV results are reference results, not guaranteed bit-for-bit outputs from a new run.
+Or in PowerShell, from the repository root:
 
-## Layout
-
-```
-config.yaml                 all settings: models, schema relations, thresholds, seeds
-prompts/extract_v1.txt      extractor prompt ({{RELATIONS}}, {{ENTITY_TYPES}} filled from the schema)
-prompts/judge_v1.txt        P judge prompt
-schema/schema.json          generated by `build-schema` from TRAIN (frozen artifact)
-src/kgrepair/
-  data.py  textutil.py      loading Re-DocRED, text normalisation
-  schema.py                 relations + allowed (head_type, tail_type) pairs from TRAIN
-  llm.py                    Ollama / OpenAI-compatible backends (+ test-only mock)
-  extract.py                one call per doc, JSONL, resume, parsing
-  repair.py                 C, S and P-rule
-  judge.py                  P LLM judge, on-disk cache
-  pipeline.py               run any of the 8 C/S/P combinations on one document
-  matching.py  evaluate.py  gold matching, automatic P/R/F1, nested samples x seeds
-  annotate.py               paired manual sample, scoring, CIs, kappa
-  report.py                 pilot report
-tests/                      offline tests
-docs/annotation_guidelines.md
-docs/midway_check.md        current preliminary metrics, blockers, and TA questions
+```powershell
+$env:PYTHONPATH = 'src'
+.\.venv\Scripts\python.exe -m kgrepair score-proposal-annotation
 ```
 
-## What the numbers mean
+Scoring validates the frozen setup, assigned IDs, and complete labels. It writes
+`results/proposal_manual_summary.csv`, including Wilson and bootstrap intervals, uncertainty
+counts, retention, correct-fact removal, and overlap agreement. It does not require new LLM calls.
 
-* **Automatic precision/recall/F1** use Re-DocRED labels restricted to the schema's relations. Gold is incomplete and entity matching is heuristic, so automatic precision is a **lower bound**. `precision` counts edges; `unique_precision` counts distinct gold triples recovered / edges (penalises duplicates); `f1` uses `unique_precision`.
-* Automatic matching uses exact overlap between normalized predicted and gold mention strings. Keep this rule aligned with the proposal; any alternative matching rule must be selected and frozen using TRAIN only, never tuned on DEV.
-* **Manual precision (primary, proposal protocol)**: after calibration and freezing the guidelines, sample 100 unique accepted edges for each of `raw`, `C`, `C+S`, and `C+S+P` from the combined five-seed, 200-document TEST runs, balancing across seeds when possible. A second annotator checks 20%; cross-stage duplicate triples are labelled once. Report precision and its interval, retention, and correct raw facts removed by repairs. The prepared 50-item TRAIN sample is only a pilot and does not satisfy this final protocol.
-* **Retention** = share of raw triples a stage still represents (a triple merged into another edge by C counts as kept). **Correct-removed share** = share of raw triples labelled correct that a stage no longer represents. Always report these next to precision.
-* Nested samples (25 ⊂ 50 ⊂ 100 ⊂ 200) of a 500-document dev pool overlap heavily across seeds, so the between-seed spread understates the true uncertainty. Say so in the report.
+## Development commands
 
-## Decisions encoded in the code (change deliberately, then re-freeze)
+Use a separate experiment checkout for further development. Prompt/rule changes belong on TRAIN,
+with DEV used for selection before a new TEST experiment. Existing TEST outcomes must not guide tuning.
 
-1. **C is within-document and rule-based**: exact normalized surface form, plus *unambiguous* containment for PER only. Naive containment for all types merged distinct entities (Albany County / Albany) in testing.
-2. **C changes node types**: a merged node carries the union of its members' types, so C can rescue a triple that S would otherwise reject. Hence C+S+P is *not* a subset of S+P.
-3. **S** uses allowed type pairs derived from TRAIN (`min_pair_count`, `min_pair_share`). For P17/P131 the pairs are broad, so S may reject little; Re-DocRED has only 6 coarse types.
-4. **P is two-stage**: rule (quote exists) then LLM judge. The judge sees the cited sentence ±1 and the claim, not the whole document. `on_error: reject` makes unusable judge output count as unsupported.
-5. **Prompt asks for one id per entity**, which reduces duplicates the extractor emits and therefore C's measurable effect. Report this.
-6. Gold annotations are never in a prompt. Only `MockBackend` (tests) reads gold, through `meta`.
+| Command | Purpose |
+|---|---|
+| `bash run.sh pilot` | Build the TRAIN schema and extract a 10-document TRAIN smoke test |
+| `bash run.sh train-baseline 200` | Extract and evaluate a larger TRAIN sample |
+| `bash run.sh extract-dev` | Cache DEV extraction |
+| `bash run.sh evaluate-dev` | Compare repairs on cached DEV outputs |
+| `bash run.sh freeze-test` | Record inputs for a deliberately selected new experiment |
 
-## Reproducibility checklist
+The historical DEV judge comparison informed disabling the judge. Changing judge generation
+settings now invalidates its cache keys; historical cached judgments are not reused as results
+from the revised settings. Optional judge-enabled development requires `llama3.2:3b` in Ollama.
 
-Pinned data commit + sha256 (`scripts/`), `temperature 0` + seed, model name/tag in `config.yaml`, extractor fingerprint stored in every raw record, raw responses and judge cache on disk, audit log of rejections, all 8 configs from one cached extraction. Record exact model tags, quantisation, Ollama version and weight hashes in your report. Add a `requirements.lock` from `pip freeze`.
+## Repository layout
 
-## Midway TRAIN-only pilot
+```text
+config.yaml                    selected experiment settings
+prompts/                       extractor and optional judge prompts
+schema/schema.json             frozen TRAIN-derived schema
+src/kgrepair/                  extraction, repairs, evaluation, annotation, statistics
+scripts/                       pinned dataset download and checksums
+tests/                         synthetic pipeline and HTTP backend checks
+docs/test_freeze.json           existing TEST freeze manifest
+docs/annotation_guidelines.md   shared annotation rules
+docs/midway_check.md            historical preliminary evidence and run context
+results/pilot_metrics.csv       tracked TRAIN pilot results
+```
 
-`bash run.sh pilot` builds the schema from TRAIN if needed, extracts 10 TRAIN documents, and writes
-`results/pilot_metrics.csv` plus a console report for `raw`, `C`, `C+S`, `P`, and `C+S+P`.
-The pilot report runs `P` with the quote-matching rule only (no LLM judge), and labels it as such.
-It is a smoke-test-sized preliminary result, not a held-out evaluation. Continue prompt/model
-iterations on TRAIN, use DEV to select the final configuration, then freeze all choices before
-running TEST.
-After a real pilot extraction, `bash run.sh annotate-train` prepares a TRAIN pilot sample. Then run
-`bash run.sh annotate-calibration <same-raw-jsonl>` to generate a separate 30-triple calibration
-sample that excludes the pilot sample's raw IDs. All annotators complete and discuss calibration
-first; freeze the guidelines before any final annotation. This TRAIN pilot and its labels are not
-the proposal's final TEST annotation. The DEV-selected configuration disables P; if P ablations
-are run, the current setting makes them quote-rule-only, not judge-assisted.
-For larger preliminary samples, `bash run.sh train-baseline 200` extracts 200 TRAIN documents,
-evaluates the configured nested sizes and seeds, and writes results under `results/train/` without
-calling the judge. Choose an extraction count large enough for the configured `eval.sizes`. Supply
-a new raw-output path as the second `pilot` argument or third `train-baseline` argument when the
-extractor fingerprint changes; the runner refuses to mix responses from different configurations.
+`data/Re-DocRED/`, `outputs/`, `annotation/`, and most `results/` files are ignored by Git.
+Keep local backups of cached responses, annotation files, stage keys, and result tables if
+sharing or archiving the study. A source-code clone alone does not include the completed labels.
 
-See [`docs/midway_check.md`](docs/midway_check.md) for the TRAIN pilot, DEV configuration
-comparison, exploratory rejected-edge audit, remaining blockers, and TA questions.
+## Citation and disclosure
 
-Generated data, raw LLM outputs, judge cache, annotations, and result files are ignored by Git.
-They remain local so Re-DocRED data and model outputs are not accidentally redistributed; retain
-the raw JSONL and its model/config fingerprint for reproducibility.
+Dataset: Tan et al., *Revisiting DocRED: Addressing the False Negative Problem in Relation
+Extraction*, EMNLP 2022. See the [Re-DocRED repository](https://github.com/tonytan48/Re-DocRED).
+The dataset repository uses the MIT License; its Wikipedia-derived text has CC BY-SA provenance.
+Dataset files are not redistributed in this repository.
 
-## AI-use disclosure, citation, licence
-
-AI tools assisted with some code and documentation during development. The project authors remain
-responsible for checking and understanding the implementation and results; disclose tool use in
-the submitted report according to course policy. Cite Re-DocRED: Tan et al., *Revisiting DocRED –
-Addressing the False Negative Problem in Relation Extraction*, EMNLP 2022. Re-DocRED repo: MIT;
-text derived from Wikipedia (CC BY-SA). Data is not redistributed here.
+AI tools assisted with code and documentation. The project authors are responsible for
+checking the implementation, annotation process, and results, and for disclosing tool use
+according to course policy.

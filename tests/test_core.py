@@ -270,7 +270,7 @@ def test_end_to_end_with_mock(cfg, tmp_path):
     assert set(calibration_key["sampled"]).isdisjoint(key["sampled"])
 
     proposal_raw = tmp_path / "raw" / "test.jsonl"
-    run_extract(cfg, "test", 20, 0, proposal_raw, log=lambda *_: None)
+    run_extract(cfg, "test", 30, 0, proposal_raw, log=lambda *_: None)
     proposal_dir = tmp_path / "proposal"
     sample_proposal_annotation(cfg, proposal_raw, log=lambda *_: None, n_per_stage=2,
                                overlap_frac=0.5, use_judge=False, out_dir=proposal_dir)
@@ -298,3 +298,82 @@ def test_end_to_end_with_mock(cfg, tmp_path):
     scored = score_proposal_annotation(cfg, proposal_dir, proposal_dir / "annotator1.csv",
                                        proposal_dir / "annotator2.csv", log=lambda *_: None)
     assert {row["config"] for row in scored} == {"raw", "C", "C+S", "C+S+P"}
+
+
+@pytest.mark.parametrize("problem", ["blank", "duplicate", "extra", "missing", "missing_second", "blank_second"])
+def test_proposal_rejects_incomplete_or_ambiguous_labels(cfg, tmp_path, problem):
+    directory = tmp_path / "labels"
+    directory.mkdir()
+    key = {"items": [{"item_id": "a"}], "overlap_item_ids": ["a"]}
+    (directory / "key.json").write_text(json.dumps(key))
+    first = [{"item_id": "a", "label": "correct"}]
+    second = [{"item_id": "a", "label": "correct"}]
+    if problem == "blank": first[0]["label"] = ""
+    if problem == "duplicate": first.append(dict(first[0]))
+    if problem == "extra": first.append({"item_id": "b", "label": "correct"})
+    if problem == "missing": first = []
+    if problem == "blank_second": second[0]["label"] = ""
+    for name, rows in [("first.csv", first), ("second.csv", second)]:
+        with (directory / name).open("w", newline="") as stream:
+            writer = csv.DictWriter(stream, fieldnames=["item_id", "label"])
+            writer.writeheader()
+            writer.writerows(rows)
+    with pytest.raises(ValueError):
+        score_proposal_annotation(cfg, directory, directory / "first.csv",
+                                  None if problem == "missing_second" else directory / "second.csv")
+    assert not (tmp_path / "results" / "proposal_manual_summary.csv").exists()
+
+
+def test_retention_includes_uncertain_items(cfg, tmp_path):
+    directory = tmp_path / "labels"
+    directory.mkdir()
+    stages = ["raw", "C", "C+S", "C+S+P"]
+    items = [{"item_id": i, "sampled_for_stages": stages,
+              "kept_by_stage": {s: (s == "raw" or i == "a") for s in stages}}
+             for i in ["a", "b"]]
+    key = {"items": items, "overlap_item_ids": [],
+           "automatic_retention_across_seed_runs": {s: 1 for s in stages}}
+    (directory / "key.json").write_text(json.dumps(key))
+    (directory / "first.csv").write_text("item_id,label\na,correct\nb,uncertain\n")
+    result = score_proposal_annotation(cfg, directory, directory / "first.csv", None, log=lambda *_: None)
+    assert result[1]["sample_retention_vs_raw"] == 0.5
+    assert result[1]["correct_raw_facts_removed_share"] == 0
+    assert result[1]["uncertain"] == 1
+
+
+def test_test_raw_requires_complete_frozen_extraction(cfg):
+    from kgrepair.extract import validate_test_raw, fingerprint
+    from kgrepair.schema import load_schema
+    schema = load_schema(cfg)
+    records = {i: {"split": "test", "fingerprint": fingerprint(cfg, schema, "test")} for i in range(30)}
+    validate_test_raw(cfg, records, schema, list(range(30)))
+    records[0]["split"] = "dev"
+    with pytest.raises(ValueError, match="split or extractor"):
+        validate_test_raw(cfg, records, schema, list(range(30)))
+    del records[0]
+    with pytest.raises(ValueError, match="every TEST document"):
+        validate_test_raw(cfg, records, schema, list(range(30)))
+
+
+def test_f1_is_zero_when_predictions_have_no_correct_matches():
+    from kgrepair.evaluate import aggregate, COUNT_KEYS
+    counts = dict.fromkeys(COUNT_KEYS, 0)
+    counts.update(edges=3, gold=4, raw_total=3)
+    assert aggregate([counts])["f1"] == 0.0
+
+
+@pytest.mark.parametrize("value", ["false", 0, None])
+def test_judge_rejects_non_boolean_support(cfg, value):
+    from kgrepair.schema import load_schema
+    judge = Judge(cfg, load_schema(cfg))
+    judge.backend.generate = lambda *args, **kwargs: {
+        "text": json.dumps({"supported": value, "reason": "bad"}), "usage": {}}
+    ok, reason = judge.check(make_doc(0), {"relation": "P19", "sent_id": 0,
+                             "quote": "born in London", "raw_id": "0:0"}, ["Ada"], ["London"])
+    assert not ok and reason.startswith("judge_error")
+
+
+def test_freeze_rejects_changed_annotation_policy(cfg):
+    cfg["annotation"]["uncertain"] = "incorrect"
+    with pytest.raises(ValueError, match="annotation"):
+        assert_test_frozen(cfg)
